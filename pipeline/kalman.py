@@ -25,6 +25,8 @@ WINDOW_N = N_RETURNS
 WEAK_BETA = 0.1
 DEGEN_BSTD_REL = 0.005
 DEGEN_DELTA_B = 1e-9
+ROLL_WIN = 120
+Z_OPP = 2.0
 
 _LOGP: np.ndarray | None = None
 
@@ -61,6 +63,33 @@ def hurst(series, max_lag: int = 20) -> float:
     return float(np.polyfit(np.log(lags[ok]), np.log(tau[ok]), 1)[0])
 
 
+def rolling_ols_beta(y: np.ndarray, x: np.ndarray, start: int, win: int = ROLL_WIN) -> np.ndarray:
+    """Slope of ln Y on ln X over the `win` closes that end the day before each index.
+
+    The hedge used on the return into day t is fit on y[t-win:t], x[t-win:t].
+    It does not use day t, matching the Kalman spread's no-look-ahead hedge.
+    """
+    y = np.asarray(y, float)
+    x = np.asarray(x, float)
+    n = len(y)
+    if start < win:
+        raise ValueError(f"Need {win} closes before index {start}.")
+    cy = np.cumsum(y)
+    cx = np.cumsum(x)
+    cxy = np.cumsum(y * x)
+    cxx = np.cumsum(x * x)
+    t = np.arange(start, n)
+    right = t - 1
+    left = t - win - 1
+    sy = cy[right] - cy[left]
+    sx = cx[right] - cx[left]
+    sxy = cxy[right] - cxy[left]
+    sxx = cxx[right] - cxx[left]
+    den = win * sxx - sx * sx
+    den = np.where(np.abs(den) < 1e-18, np.nan, den)
+    return (win * sxy - sx * sy) / den
+
+
 def compute_pair(i: int, j: int, ly: np.ndarray, lx: np.ndarray) -> dict:
     ly = np.asarray(ly, float)
     lx = np.asarray(lx, float)
@@ -74,10 +103,23 @@ def compute_pair(i: int, j: int, ly: np.ndarray, lx: np.ndarray) -> dict:
     level = yw - b_pred * xw
     dly = np.diff(ly)[w0 - 1 :]
     dlx = np.diff(lx)[w0 - 1 :]
-    spread = np.cumsum(dly - b_pred * dlx)
+    spread_inc = dly - b_pred * dlx
+    spread = np.cumsum(spread_inc)
     innov = fwd["innov"][w0:]
+    b_std = fwd["b_std"][w0:]
     mu, sd = float(spread.mean()), float(spread.std(ddof=1))
     z = (spread - mu) / sd if sd > 0 else np.zeros_like(spread)
+    abs_z = np.abs(z)
+    z_pct = float(np.mean(abs_z <= abs_z[-1]) * 100.0)
+    roll_b = rolling_ols_beta(ly, lx, w0, ROLL_WIN)
+    roll_spread = np.cumsum(dly - roll_b * dlx)
+    r_mu, r_sd = float(roll_spread.mean()), float(roll_spread.std(ddof=1))
+    roll_z = (roll_spread - r_mu) / r_sd if r_sd > 0 else np.zeros_like(roll_spread)
+    roll_adf = residual_adf_p(roll_spread)
+    roll_kpss = kpss_p(roll_spread)
+    roll_stat = bool(roll_adf < 0.05 and roll_kpss > 0.05)
+    roll_z_now = float(roll_z[-1])
+    roll_pass = bool(roll_stat and abs(roll_z_now) >= Z_OPP)
     res = stats.linregress(xw, yw)
     ols_resid = yw - res.intercept - res.slope * xw
     bstd = float(np.std(b_filt, ddof=1))
@@ -117,7 +159,17 @@ def compute_pair(i: int, j: int, ly: np.ndarray, lx: np.ndarray) -> dict:
         "olsR2": float(res.rvalue ** 2),
         "olsAdf": residual_adf_p(ols_resid),
         "betaSeries": b_filt.tolist(),
+        "betaStdSeries": b_std.tolist(),
         "zSeries": z.tolist(),
+        "zAbsPercentile": z_pct,
+        "spreadInc": spread_inc.tolist(),
+        "rollBetaLast": float(roll_b[-1]),
+        "rollZNow": roll_z_now,
+        "rollAdf": roll_adf,
+        "rollKpss": roll_kpss,
+        "rollStat": roll_stat,
+        "rollPass": roll_pass,
+        "rollZSeries": roll_z.tolist(),
     }
 
 
@@ -163,6 +215,18 @@ def _run_pairs(logp: np.ndarray, workers: int) -> list[dict]:
     return results
 
 
+def _check_rolling_beta(logp: np.ndarray, row: dict) -> None:
+    """The last rolling hedge must match a direct 120-day linregress, excluding today."""
+    ly = logp[:, row["i"]]
+    lx = logp[:, row["j"]]
+    res = stats.linregress(lx[-ROLL_WIN - 1 : -1], ly[-ROLL_WIN - 1 : -1])
+    if not np.isfinite(row["rollBetaLast"]) or abs(float(res.slope) - row["rollBetaLast"]) > 1e-8:
+        raise SystemExit(
+            f"Rolling OLS beta for {row['y']}/{row['x']} is {row['rollBetaLast']}, "
+            f"linregress slope is {float(res.slope)}."
+        )
+
+
 def compute_kalman(frame: pd.DataFrame, workers: int | None = None) -> dict:
     if frame.shape[1] != N_PAIRS:
         raise SystemExit(f"Kalman expected {N_PAIRS} columns, got {frame.shape[1]}.")
@@ -180,6 +244,7 @@ def compute_kalman(frame: pd.DataFrame, workers: int | None = None) -> dict:
     results.sort(key=lambda r: (r["i"], r["j"]))
     if len(results) != 378:
         raise SystemExit(f"Expected 378 Kalman pairs, got {len(results)}.")
+    _check_rolling_beta(logp, results[0])
 
     for row in results:
         row["kStat"] = bool(row["adf"] < 0.05 and row["kpss"] > 0.05)

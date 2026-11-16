@@ -5,6 +5,7 @@ const PAIRS = DATA.pairs;
 const N = PAIRS.length;
 const OLS = DATA.ols;
 const KAL = DATA.kalman;
+const SCREEN = DATA.screen;
 const SPUR = new Set(OLS.spurious.map(function (p) { return p[0] + "," + p[1]; }));
 const REC = new Map(KAL.records.map(function (r) { return [r.i + "," + r.j, r]; }));
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -119,7 +120,12 @@ function fillMeta() {
     "Generated " + prettyStamp(DATA.generatedAtSast) +
     " · window " + OLS.returnStart + " → " + OLS.returnEnd +
     " · " + DATA.source +
-    " · Africa/Johannesburg (SAST, UTC+2). Research only.";
+    " · Africa/Johannesburg (SAST, UTC+2). Research only, not trading advice.";
+  const stamp = parseSast(DATA.generatedAtSast);
+  const staleDays = (SCREEN && SCREEN.rules && SCREEN.rules.staleDays) || 3;
+  if (stamp && Date.now() - stamp.getTime() > staleDays * 86400000) {
+    document.getElementById("stale").hidden = false;
+  }
   const c = KAL.counts;
   document.getElementById("innov-hl").textContent = fmtDays(c.innovHlMedian);
   document.getElementById("level-hl").textContent = fmtDays(c.levelHlMedian);
@@ -129,13 +135,86 @@ function fillMeta() {
     ". Hedge-ratio noise was estimated on " + KAL.estStart + " → " + KAL.estEnd + " and then frozen. Upper triangle only.";
 }
 
-function selectTab(name) {
+function parseSast(s) {
+  const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/);
+  if (!m) return null;
+  return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4] - 2, +m[5]));
+}
+
+let returnHash = "#opportunities";
+
+function canonicalRecord(i, j) {
+  if (i === j) return null;
+  if (i > j) { const swap = i; i = j; j = swap; }
+  return REC.get(i + "," + j) || null;
+}
+
+function pairHash(r) { return "#pair=" + r.y + "_" + r.x; }
+
+function findRecord(token) {
+  const parts = String(token || "").split("_");
+  if (parts.length !== 2) return null;
+  const a = PAIRS.indexOf(parts[0]);
+  const b = PAIRS.indexOf(parts[1]);
+  if (a < 0 || b < 0) return null;
+  return canonicalRecord(a, b);
+}
+
+function showPanels(which) {
+  document.getElementById("panel-opp").hidden = which !== "opp";
+  document.getElementById("panel-full").hidden = which !== "full";
+  document.getElementById("panel-pair").hidden = which !== "pair";
+  document.getElementById("tab-opp").setAttribute("aria-selected", which === "opp" ? "true" : "false");
+  document.getElementById("tab-full").setAttribute("aria-selected", which === "full" ? "true" : "false");
+}
+
+function selectSub(name) {
   const ols = name !== "kalman";
   document.getElementById("tab-ols").setAttribute("aria-selected", ols ? "true" : "false");
   document.getElementById("tab-kalman").setAttribute("aria-selected", ols ? "false" : "true");
   document.getElementById("panel-ols").hidden = !ols;
   document.getElementById("panel-kalman").hidden = ols;
-  if (location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
+}
+
+function selectTab(name) {
+  selectSub(name);
+  showPanels("full");
+  const hash = name === "kalman" ? "#full-kalman" : "#full-ols";
+  if (location.hash !== hash) history.replaceState(null, "", hash);
+}
+
+function route() {
+  const hash = location.hash || "#opportunities";
+  if (hash.indexOf("#pair=") === 0) {
+    const rec = findRecord(decodeURIComponent(hash.slice(6)));
+    if (!rec) {
+      history.replaceState(null, "", "#opportunities");
+      showPanels("opp");
+      return;
+    }
+    showPanels("pair");
+    renderPair(rec);
+    window.scrollTo(0, 0);
+    return;
+  }
+  if (hash === "#kalman" || hash === "#full-kalman") {
+    selectSub("kalman");
+    showPanels("full");
+    return;
+  }
+  if (hash === "#ols" || hash === "#full-ols" || hash === "#full") {
+    selectSub("ols");
+    showPanels("full");
+    return;
+  }
+  showPanels("opp");
+}
+
+function openPair(i, j) {
+  const rec = canonicalRecord(i, j);
+  if (!rec) return;
+  if (location.hash.indexOf("#pair=") !== 0) returnHash = location.hash || "#opportunities";
+  location.hash = pairHash(rec);
 }
 
 function valuesOf(matrix, skipDiag) {
@@ -294,6 +373,7 @@ function buildHeat(table, mode) {
     const j = Number(td.dataset.j);
     if (mode === "ols") selectOls(i, j);
     else selectKal(i, j, true);
+    openPair(i, j);
   });
 }
 
@@ -740,6 +820,10 @@ function drawChart(svg, values, opt) {
   (opt.refs || []).forEach(function (ref) {
     if (finite(ref.value)) { lo = Math.min(lo, ref.value); hi = Math.max(hi, ref.value); }
   });
+  if (opt.band) {
+    opt.band.upper.forEach(function (v) { if (finite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); } });
+    opt.band.lower.forEach(function (v) { if (finite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); } });
+  }
   if (!(hi > lo)) { lo -= 1; hi += 1; }
   const padY = (hi - lo) * 0.08;
   lo -= padY;
@@ -783,6 +867,23 @@ function drawChart(svg, values, opt) {
       svg.append(label);
     }
   });
+  if (opt.band) {
+    let area = "";
+    let started = false;
+    opt.band.upper.forEach(function (v, i) {
+      if (!finite(v) || !finite(opt.band.lower[i])) { started = false; return; }
+      area += (started ? "L" : "M") + xOf(i).toFixed(1) + "," + yOf(v).toFixed(1);
+      started = true;
+    });
+    for (let i = opt.band.lower.length - 1; i >= 0; i--) {
+      const v = opt.band.lower[i];
+      if (!finite(v) || !finite(opt.band.upper[i])) continue;
+      area += "L" + xOf(i).toFixed(1) + "," + yOf(v).toFixed(1);
+    }
+    if (area) {
+      svg.append(svgEl("path", { d: area + "Z", fill: "rgba(224,177,94,0.16)", stroke: "none" }));
+    }
+  }
   let d = "";
   let pen = false;
   values.forEach(function (v, i) {
@@ -808,7 +909,212 @@ function drawCharts(r) {
   });
 }
 
+function dirText(row) {
+  const name = row.direction === "rich" ? "Spread rich" : row.direction === "cheap" ? "Spread cheap" : "Flat";
+  return fmt(row.z, 3) + " · " + name;
+}
+
+function rollText(row) {
+  if (row.rollPass) return "Yes";
+  const bits = [];
+  if (!row.rollStat) bits.push("not stationary");
+  if (!finite(row.rollZNow) || Math.abs(row.rollZNow) < 2) bits.push("|z| " + fmt(row.rollZNow, 3));
+  return "No · " + (bits.join(", ") || "no");
+}
+
+function renderScreenTable(table, rows) {
+  table.replaceChildren();
+  if (!rows.length) return;
+  const heads = ["Pair", "Beta", "z-score", "Half-life", "ADF p", "KPSS p", "Hurst", "Rolling OLS 120d", "Currencies", "Overlap"];
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  heads.forEach(function (name, idx) {
+    const th = document.createElement("th");
+    if (idx === 0 || idx >= 7) th.className = "left";
+    th.textContent = name;
+    hr.append(th);
+  });
+  thead.append(hr);
+  const tb = document.createElement("tbody");
+  rows.forEach(function (row) {
+    const tr = document.createElement("tr");
+    tr.addEventListener("click", function () { openPair(row.i, row.j); });
+    const pair = document.createElement("td");
+    pair.className = "left pair";
+    pair.textContent = row.y + " vs " + row.x;
+    tr.append(pair);
+    function cell(text, left, extreme) {
+      const td = document.createElement("td");
+      if (left) td.className = "left";
+      if (extreme) td.classList.add("extreme");
+      td.textContent = text;
+      return td;
+    }
+    tr.append(cell(fmt(row.betaNow, 4), false, false));
+    tr.append(cell(dirText(row), false, Math.abs(row.z) >= 2));
+    tr.append(cell(finite(row.hl) ? fmt(row.hl, 3) + " d" : "—", false, false));
+    tr.append(cell(fmtP(row.adf), false, false));
+    tr.append(cell(fmtP(row.kpss), false, false));
+    tr.append(cell(fmt(row.hurst, 3), false, false));
+    tr.append(cell(rollText(row), true, false));
+    const tags = document.createElement("td");
+    tags.className = "left";
+    row.currencies.forEach(function (ccy) {
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = ccy;
+      tags.append(tag);
+    });
+    tr.append(tags);
+    const sim = document.createElement("td");
+    sim.className = "left similar";
+    if (row.similar && row.similar.length) {
+      sim.textContent = row.similar.map(function (other) {
+        return "Similar to " + other.y + "/" + other.x + " (" + fmt(other.corr, 3) + ")";
+      }).join("; ");
+    } else sim.textContent = "—";
+    tr.append(sim);
+    tb.append(tr);
+  });
+  table.append(thead, tb);
+}
+
+function renderConcentration() {
+  const box = document.getElementById("concentration");
+  box.replaceChildren();
+  if (!SCREEN.nOpportunities) {
+    const note = document.createElement("p");
+    note.className = "note";
+    note.textContent = "No opportunities on this snapshot, so there is no shared-currency concentration to report.";
+    box.append(note);
+    return;
+  }
+  const shared = (SCREEN.currencies || []).filter(function (item) { return item.count >= 2; });
+  if (!shared.length) {
+    const note = document.createElement("p");
+    note.className = "note";
+    note.textContent = "No currency appears in more than one opportunity.";
+    box.append(note);
+    return;
+  }
+  const conc = document.createElement("div");
+  conc.className = "conc";
+  shared.forEach(function (item) {
+    const el = document.createElement("div");
+    el.className = "warn";
+    el.textContent = item.currency + " appears in " + item.count + " of " + item.n;
+    conc.append(el);
+  });
+  const groups = document.createElement("div");
+  groups.className = "groups";
+  shared.forEach(function (item) {
+    const line = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = item.currency;
+    line.append(name, document.createTextNode(" · " + item.pairs.join(", ")));
+    groups.append(line);
+  });
+  box.append(conc, groups);
+}
+
+function renderScreen() {
+  const opps = SCREEN.opportunities || [];
+  const watch = SCREEN.watchlist || [];
+  document.getElementById("opp-title").textContent = "Opportunities · " + opps.length;
+  document.getElementById("watch-title").textContent = "Watchlist · " + watch.length;
+  document.getElementById("opp-empty").hidden = opps.length > 0;
+  document.getElementById("watch-empty").hidden = watch.length > 0;
+  renderScreenTable(document.getElementById("table-opp"), opps);
+  renderScreenTable(document.getElementById("table-watch"), watch);
+  renderConcentration();
+}
+
+function zBands() {
+  return [
+    { value: 2, color: "#e08a8a", label: "+2" },
+    { value: 1, color: "#8d735c", label: "+1" },
+    { value: -1, color: "#8d735c", label: "−1" },
+    { value: -2, color: "#e08a8a", label: "−2" },
+    { value: 0, color: "#66758a", dash: "2 3", label: "" }
+  ];
+}
+
+function renderPair(r) {
+  document.getElementById("pair-title").textContent = r.y + " vs " + r.x;
+  document.getElementById("pair-orient").textContent =
+    "Kalman orientation: " + r.y + " on " + r.x + ". Research description of this estimate, not a trade.";
+  const listed = (SCREEN.opportunities || []).concat(SCREEN.watchlist || []).filter(function (row) {
+    return row.i === r.i && row.j === r.j;
+  })[0];
+  const flags = document.getElementById("pair-flags");
+  flags.replaceChildren();
+  function addFlag(text, cls) {
+    const el = document.createElement("span");
+    el.className = "flag " + cls;
+    el.textContent = text;
+    flags.append(el);
+  }
+  if (r.z > 0) addFlag("Spread rich", "bad");
+  else if (r.z < 0) addFlag("Spread cheap", "ok");
+  if (r.rollPass) addFlag("Rolling OLS agrees", "ok");
+  else addFlag("Rolling OLS does not agree", "static");
+  if (r.degenerate) addFlag("Static beta", "static");
+  if (r.weakHedge) addFlag("Weak hedge", "weak");
+  const stats = document.getElementById("pair-stats");
+  stats.replaceChildren();
+  stats.append(
+    statCard("Half-life", finite(r.hl) ? fmt(r.hl, 3) + " d" : "—", "AR(1) on the Kalman spread"),
+    statCard("ADF p", fmtP(r.adf), "Tradeable spread"),
+    statCard("KPSS p", fmtP(r.kpss), "Not rejected above 0.05"),
+    statCard("Hurst", fmt(r.hurst, 3), "Lags 2 to 20"),
+    statCard("Current z", fmt(r.z, 3), r.z > 0 ? "Spread rich" : r.z < 0 ? "Spread cheap" : "Flat"),
+    statCard("|z| percentile", finite(r.zAbsPercentile) ? fmt(r.zAbsPercentile, 3) : "—", "Share of window days with |z| at or below this"),
+    statCard("Kalman beta", fmt(r.betaNow, 4), "Filtered, last day"),
+    statCard("Rolling OLS", r.rollPass ? "Yes" : "No", "Stationary and |z| ≥ 2, 120-day hedge")
+  );
+  const sim = document.getElementById("pair-similar");
+  const onList = (SCREEN.opportunities || []).some(function (row) { return row.i === r.i && row.j === r.j; });
+  if (listed && listed.similar && listed.similar.length) {
+    sim.textContent = "Currencies: " + listed.currencies.join(", ") + ". " + listed.similar.map(function (other) {
+      return "Similar to " + other.y + "/" + other.x + " (spread-return correlation " + fmt(other.corr, 3) + ").";
+    }).join(" ");
+  } else if (onList) {
+    sim.textContent = "Currencies: " + listed.currencies.join(", ") + ". No other opportunity has spread-return correlation above 0.8 with this pair.";
+  } else if (listed) {
+    sim.textContent = "Currencies: " + listed.currencies.join(", ") + ". Similar-pair notes are raised only between opportunities.";
+  } else {
+    const ccys = [r.y.slice(0, 3), r.y.slice(3), r.x.slice(0, 3), r.x.slice(3)];
+    const uniq = ccys.filter(function (c, i) { return ccys.indexOf(c) === i; }).sort();
+    sim.textContent = "Currencies: " + uniq.join(", ") + ". This pair is not on the opportunity list or the watchlist.";
+  }
+  drawChart(document.getElementById("chart-pair-z"), r.zSeries, { color: "#8eb7ff", refs: zBands() });
+  const upper = r.betaSeries.map(function (v, i) {
+    return finite(v) && finite(r.betaStdSeries[i]) ? v + 2 * r.betaStdSeries[i] : null;
+  });
+  const lower = r.betaSeries.map(function (v, i) {
+    return finite(v) && finite(r.betaStdSeries[i]) ? v - 2 * r.betaStdSeries[i] : null;
+  });
+  drawChart(document.getElementById("chart-pair-beta"), r.betaSeries, {
+    color: "#e0b15e",
+    band: { upper: upper, lower: lower }
+  });
+  const betaNote = document.querySelector("#chart-pair-beta").previousElementSibling;
+  if (betaNote) {
+    betaNote.textContent = "Filtered hedge ratio. The band is ±2 filter standard deviations of beta. Static OLS beta on this window is " + fmt(r.olsBeta, 4) + ".";
+  }
+  drawChart(document.getElementById("chart-pair-roll"), r.rollZSeries, { color: "#3dbe9a", refs: zBands() });
+}
+
 function bind() {
+  document.getElementById("tab-opp").addEventListener("click", function () {
+    location.hash = "#opportunities";
+  });
+  document.getElementById("tab-full").addEventListener("click", function () {
+    location.hash = document.getElementById("panel-kalman").hidden ? "#full-ols" : "#full-kalman";
+  });
+  document.getElementById("pair-back").addEventListener("click", function () {
+    location.hash = returnHash && returnHash.indexOf("#pair=") !== 0 ? returnHash : "#opportunities";
+  });
   document.getElementById("tab-ols").addEventListener("click", function () { selectTab("ols"); });
   document.getElementById("tab-kalman").addEventListener("click", function () { selectTab("kalman"); });
   document.getElementById("ols-metrics").addEventListener("click", function (event) {
@@ -836,9 +1142,7 @@ function bind() {
     const parts = event.target.value.split(",");
     selectKal(Number(parts[0]), Number(parts[1]), false);
   });
-  window.addEventListener("hashchange", function () {
-    selectTab(location.hash === "#kalman" ? "kalman" : "ols");
-  });
+  window.addEventListener("hashchange", route);
 }
 
 function setRule(rule) {
@@ -873,8 +1177,9 @@ function init() {
     || KAL.records.slice().sort(function (a, b) { return a.adf - b.adf; })[0];
   renderKalTable();
   selectKal(first.i, first.j, false);
+  renderScreen();
   bind();
-  if (location.hash === "#kalman") selectTab("kalman");
+  route();
 }
 
 init();

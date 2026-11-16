@@ -277,12 +277,81 @@ select, input[type="search"] {
 .tip[hidden] { display: none; }
 .tip .pair { color: var(--gold); }
 footer { margin-top: 28px; color: var(--faint); font-size: 12.5px; }
+.banner.foot { margin-bottom: 8px; }
+.stale {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(224, 138, 138, 0.55);
+  background: rgba(224, 138, 138, 0.12);
+  color: #f0c2c2;
+}
+.stale[hidden] { display: none; }
+.howto {
+  margin: 0 0 14px;
+  background: var(--elev);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px 14px;
+}
+.howto summary { cursor: pointer; font-weight: 650; }
+.howto-body p { color: var(--muted); margin: 8px 0 0; }
+.conc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+.conc .warn {
+  background: rgba(224, 177, 94, 0.12);
+  border: 1px solid rgba(224, 177, 94, 0.45);
+  color: var(--gold);
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+.groups { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
+.groups strong { color: var(--text); font-weight: 650; }
+.tag {
+  display: inline-block;
+  margin: 2px 4px 2px 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--elev-2);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-family: var(--mono);
+}
+.similar { color: var(--gold); font-size: 12px; }
+.empty { color: var(--muted); }
+.text-btn {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text);
+  padding: 6px 12px;
+}
+.pair-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+.tabs.sub { margin-top: 0; }
+#panel-full { margin-top: 8px; }
+#panel-opp .card, #panel-pair .card { margin-bottom: 0; }
+#panel-opp, #panel-pair { display: grid; gap: 16px; }
+#panel-opp[hidden], #panel-pair[hidden], #panel-full[hidden] { display: none; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 @media (max-width: 1180px) {
   .split, .cards { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 760px) {
   h1 { font-size: 26px; }
-  .split, .cards { grid-template-columns: 1fr; }
+  .split, .cards, .pair-stats { grid-template-columns: 1fr 1fr; }
+  .split { grid-template-columns: 1fr; }
   .wrap { padding: 18px 12px 48px; }
+  table.data { font-size: 12px; }
+  .tabs button { padding: 10px 12px; }
 }

@@ -13,6 +13,26 @@ The generated file is one self-contained `site/index.html` (vanilla JS and SVG, 
 
 EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD, NZDUSD, EURGBP, EURJPY, EURCHF, EURAUD, EURCAD, EURNZD, GBPJPY, GBPCHF, GBPAUD, GBPCAD, GBPNZD, AUDJPY, AUDCHF, AUDCAD, AUDNZD, NZDJPY, NZDCHF, NZDCAD, CADJPY, CADCHF, CHFJPY.
 
+## Opportunities
+
+The landing view is a research screen, not a trade list. A pair is an opportunity only when all of these hold on the Kalman tradeable spread:
+
+- ADF p < 0.05 and KPSS p > 0.05
+- half-life between 3 and 30 trading days
+- current |z| ≥ 2
+
+The table sorts by |z|. Positive z is labelled spread rich (the spread is high in its own window); negative z is spread cheap. The watchlist uses the same stationarity and half-life filters with 1.5 ≤ |z| < 2.
+
+Each row has a 120-day rolling OLS cross-check. The hedge for each day is ordinary least squares of ln Y on ln X over the previous 120 closes, not including that day. The re-hedged spread is then tested the same way. The column is yes only when that spread is stationary and its |z| is at least 2.
+
+Currency tags are the currencies inside the two pair names. A banner counts how many opportunities share each currency. Two opportunities are marked similar when the correlation of their daily spread changes is above 0.8.
+
+Clicking a row, or a cell on either full-screen heatmap, opens `#pair=EURUSD_GBPUSD` (Y_X in the Kalman orientation). That view charts the Kalman z-score with ±1 and ±2 bands, the filtered beta with its ±2 filter-standard-deviation band, and the rolling-OLS z-score.
+
+The header and the footer both say “Research only, not trading advice”. If the snapshot timestamp is more than three days behind the clock on the machine opening the page, a stale-data warning is shown.
+
+The OLS and Kalman matrices are unchanged and sit under **Full screen**.
+
 ## What the numbers are
 
 Both tabs share the last 250 weekday sessions. Weekend bars are dropped. A date is kept only when every pair has a positive close that day. Nothing is interpolated.

@@ -183,6 +183,7 @@ def kalman_forward(y, x, params):
         "b_pred": xp[:, 1],
         "a_filt": xf[:, 0],
         "b_filt": xf[:, 1],
+        "b_std": np.sqrt(np.maximum(Pf[:, 1, 1], 0.0)),
         "innov": innov,
         "F": F,
         "loglik": loglik,
