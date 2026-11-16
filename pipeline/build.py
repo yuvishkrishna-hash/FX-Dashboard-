@@ -28,6 +28,7 @@ from pipeline.fetch import fetch_panel  # noqa: E402
 from pipeline.kalman import compute_kalman  # noqa: E402
 from pipeline.ols import compute_ols  # noqa: E402
 from pipeline.render import render_page  # noqa: E402
+from pipeline.screen import assert_screen, build_screen  # noqa: E402
 from pipeline.universe import N_PAIRS, N_RETURNS, PAIRS, SAST_NAME  # noqa: E402
 
 SITE = ROOT / "site"
@@ -131,7 +132,9 @@ def _public_kalman(kalman: dict) -> dict:
         "spreadMean", "spreadSd", "betaNow", "betaMin", "betaMax", "betaStd",
         "betaStdRel", "deltaB", "ve", "emIters", "degenerate", "weakHedge",
         "olsBeta", "olsR2", "olsAdf", "kStat", "kAdf", "oStat",
-        "betaSeries", "zSeries",
+        "betaSeries", "betaStdSeries", "zSeries", "zAbsPercentile",
+        "rollBetaLast", "rollZNow", "rollAdf", "rollKpss", "rollStat", "rollPass",
+        "rollZSeries",
     ]
     counts = {}
     for key, value in kalman["counts"].items():
@@ -151,6 +154,16 @@ def _public_kalman(kalman: dict) -> dict:
         "counts": counts,
         "records": [crow(row, keep) for row in kalman["records"]],
     }
+
+
+def cobj(value, sig: int = SCALAR_SIG):
+    if isinstance(value, str) or isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, dict):
+        return {key: cobj(item, sig) for key, item in value.items()}
+    if isinstance(value, list):
+        return [cobj(item, sig) for item in value]
+    return cnum(value, sig)
 
 
 def _check_windows(ols: dict, kalman: dict) -> None:
@@ -183,7 +196,9 @@ def _write_site(data: dict) -> None:
         data["generatedAtSast"],
         "OLS regression matrix",
         "Kalman hedge",
-        "Research only",
+        "Research only, not trading advice",
+        "How to read this",
+        "Opportunities",
     ):
         if needle not in html:
             raise SystemExit(f"Rendered page is missing {needle!r}.")
@@ -196,6 +211,17 @@ def _write_site(data: dict) -> None:
         raise SystemExit("Embedded Kalman ADF does not match site/data.json.")
     if len(embedded["kalman"]["records"]) != 378 or len(embedded["pairs"]) != N_PAIRS:
         raise SystemExit("Embedded payload does not contain 28 pairs and 378 Kalman records.")
+    screen = embedded.get("screen")
+    if not screen or "opportunities" not in screen or "watchlist" not in screen:
+        raise SystemExit("Embedded payload is missing the opportunity screen.")
+    if screen["nOpportunities"] != len(screen["opportunities"]) or screen["nWatchlist"] != len(screen["watchlist"]):
+        raise SystemExit("Screen counts do not match the embedded lists.")
+    rec = embedded["kalman"]["records"][0]
+    for key in ("rollZSeries", "betaStdSeries", "zSeries", "betaSeries"):
+        if len(rec[key]) != 250:
+            raise SystemExit(f"Embedded {key} is not 250 points.")
+    if embedded["screen"] != data["screen"]:
+        raise SystemExit("Embedded opportunity screen does not match site/data.json.")
     text = json.dumps(data, separators=(",", ":"), ensure_ascii=True)
     (SITE / "data.json").write_text(text + "\n", encoding="utf-8")
     if not html.endswith("\n"):
@@ -260,6 +286,19 @@ def _print_summary(data: dict) -> None:
         f"median HL={counts['stationaryHlMedian']}",
         flush=True,
     )
+    screen = data["screen"]
+    print(
+        f"Opportunities: {screen['nOpportunities']}   Watchlist: {screen['nWatchlist']}   "
+        f"Eligible (stationary, half-life 3–30d): {screen['nEligible']}",
+        flush=True,
+    )
+    for rank, row in enumerate(screen["opportunities"][:8], 1):
+        print(
+            f"  {rank}. {row['y']} vs {row['x']}: z={row['z']} ({row['direction']})  "
+            f"β={row['betaNow']}  HL={row['hl']}  roll={'yes' if row['rollPass'] else 'no'}  "
+            f"{' '.join(row['currencies'])}",
+            flush=True,
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -298,6 +337,8 @@ def main(argv: list[str] | None = None) -> int:
     workers = args.workers or None
     kalman = compute_kalman(frame, workers=workers)
     _check_windows(ols, kalman)
+    screen = build_screen(kalman["records"])
+    assert_screen(kalman["records"], screen)
 
     stamp = datetime.now(SAST).strftime("%Y-%m-%d %H:%M SAST")
     data = {
@@ -307,6 +348,7 @@ def main(argv: list[str] | None = None) -> int:
         "pairs": list(PAIRS),
         "ols": _public_ols(ols),
         "kalman": _public_kalman(kalman),
+        "screen": cobj(screen),
     }
     _write_site(data)
     _print_summary(data)
