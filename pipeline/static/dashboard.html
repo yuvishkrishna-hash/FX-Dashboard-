@@ -13,32 +13,22 @@ __CSS__
 <body>
 <div class="wrap">
   <header>
-    <p class="eyebrow">Foreign exchange · research</p>
-    <h1>FX research dashboard</h1>
-    <p class="lede">A research screen of the 28 major and minor pairs, plus the full OLS and Kalman matrices. It records where a Kalman spread is stationary and far from its own window. It does not place or recommend trades.</p>
+    <div class="topbar">
+      <div>
+        <p class="eyebrow">Foreign exchange · research</p>
+        <h1>FX pairs</h1>
+      </div>
+      <a class="text-btn" id="more-link" href="#more">More</a>
+    </div>
     <div class="banner" id="research-banner">Research only, not trading advice</div>
+    <p class="asof" id="asof">Data as of …</p>
     <p class="stale" id="stale" hidden>This snapshot is more than 3 days old. The figures are from the timestamp above, not from a live feed.</p>
-    <div class="meta" id="meta"></div>
   </header>
 
-  <nav class="tabs" role="tablist" aria-label="Views">
-    <button type="button" role="tab" id="tab-opp" aria-controls="panel-opp" aria-selected="true">Opportunities</button>
-    <button type="button" role="tab" id="tab-full" aria-controls="panel-full" aria-selected="false">Full screen</button>
-  </nav>
-
-  <section class="panel" id="panel-opp" role="tabpanel" aria-labelledby="tab-opp">
-    <details class="howto">
-      <summary>How to read this</summary>
-      <div class="howto-body">
-        <p>An opportunity passes every filter on the Kalman tradeable spread: ADF p &lt; 0.05, KPSS not rejected (p &gt; 0.05), half-life from 3 to 30 trading days, and a current |z| of at least 2. The list is sorted by |z|. The watchlist is the same stationarity and half-life screen with |z| from 1.5 up to 2.</p>
-        <p>Spread rich means the tradeable spread is high versus its own 250-day window (positive z). Spread cheap means it is low (negative z). That is a description of the estimate, not an instruction to buy or sell either leg.</p>
-        <p>The rolling-OLS column refits ln Y = a + b ln X on the previous 120 closes, rebuilds the same re-hedged spread, and answers whether that spread is also stationary with |z| ≥ 2. A currency tag is the set of currencies in the two pair names. The banner counts how often each currency shows up in the opportunity list. “Similar to” means the daily spread changes of two opportunities correlate above 0.8.</p>
-      </div>
-    </details>
-    <div id="concentration"></div>
+  <section class="panel" id="panel-opp" role="tabpanel">
     <article class="card">
       <h2 id="opp-title">Opportunities</h2>
-      <p class="sub">Kalman spread stationary, half-life 3–30 days, and |z| ≥ 2. Click a row for the pair detail.</p>
+      <p class="sub" id="agree-rule">Kalman spread: ADF p &lt; 0.05, KPSS not rejected, half-life 3–30 days, |z| ≥ 2. Sorted by |z|. Rolling agrees means the 120-day rolling OLS z has the same sign and |z| ≥ 1.5.</p>
       <p class="empty" id="opp-empty" hidden>No pair passes every filter on this snapshot.</p>
       <div class="table-wrap"><table class="data" id="table-opp"></table></div>
     </article>
@@ -51,36 +41,24 @@ __CSS__
   </section>
 
   <section class="panel" id="panel-pair" role="tabpanel" aria-labelledby="pair-title" hidden>
-    <div class="toolbar">
-      <button type="button" class="text-btn" id="pair-back">Back</button>
-      <p class="sub" id="pair-orient"></p>
-    </div>
+    <p><a class="text-btn" id="pair-back" href="#opportunities">Back</a></p>
     <article class="card">
       <h2 id="pair-title">Pair</h2>
-      <div id="pair-flags"></div>
-      <div class="pair-stats" id="pair-stats"></div>
-      <p class="note" id="pair-similar"></p>
+      <p class="sub" id="pair-orient"></p>
+      <svg id="chart-pair-z" role="img" aria-label="Kalman spread z-score"></svg>
     </article>
-    <div class="stack">
-      <article class="card">
-        <h3>Kalman spread z-score</h3>
-        <p class="sub">Tradeable re-hedged spread, in units of its own 250-day standard deviation. Lines at 0, ±1, and ±2. Not an entry or exit rule.</p>
-        <svg id="chart-pair-z" role="img" aria-label="Pair spread z-score"></svg>
-      </article>
-      <article class="card">
-        <h3>Kalman beta</h3>
-        <p class="sub">Filtered hedge ratio. The band is ±2 filter standard deviations of beta. The dashed line is the static OLS hedge on this window.</p>
-        <svg id="chart-pair-beta" role="img" aria-label="Pair Kalman beta"></svg>
-      </article>
-      <article class="card">
-        <h3>120-day rolling OLS z-score</h3>
-        <p class="sub">Same re-hedged spread, using an OLS hedge fit on the previous 120 closes only. Lines at 0, ±1, and ±2.</p>
-        <svg id="chart-pair-roll" role="img" aria-label="Rolling OLS spread z-score"></svg>
-      </article>
-    </div>
   </section>
 
-  <section class="panel" id="panel-full" role="tabpanel" aria-labelledby="tab-full" hidden>
+  <section class="panel" id="panel-full" role="tabpanel" hidden>
+  <p><a class="text-btn" href="#opportunities">Back</a></p>
+  <details class="howto">
+    <summary>How to read this</summary>
+    <div class="howto-body">
+      <p>An opportunity passes every filter on the Kalman tradeable spread: ADF p &lt; 0.05, KPSS not rejected (p &gt; 0.05), half-life from 3 to 30 trading days, and a current |z| of at least 2. Rolling agrees means the 120-day rolling OLS z has the same sign as the Kalman z and |rolling z| is at least 1.5.</p>
+      <p>The matrices below are the full OLS and Kalman screens. They are research records, not trade instructions.</p>
+    </div>
+  </details>
+  <div id="concentration"></div>
   <nav class="tabs sub" role="tablist" aria-label="Full matrices">
     <button type="button" role="tab" id="tab-ols" aria-controls="panel-ols" aria-selected="true">OLS regression matrix</button>
     <button type="button" role="tab" id="tab-kalman" aria-controls="panel-kalman" aria-selected="false">Kalman hedge &amp; spread</button>
