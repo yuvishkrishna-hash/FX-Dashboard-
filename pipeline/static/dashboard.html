@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Research dashboard of daily OLS regression matrices and Kalman hedge-ratio spreads for 28 major and minor FX pairs. No trading signals.">
+<title>FX research dashboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2310141c'/%3E%3Cpath d='M2 11.5 L6 7.5 L9 9.2 L14 4' stroke='%23e0b15e' fill='none' stroke-width='1.6'/%3E%3C/svg%3E">
+<style>
+__CSS__
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Foreign exchange · research</p>
+    <h1>FX research dashboard</h1>
+    <p class="lede">Daily OLS regression matrices and a Kalman-filter hedge ratio for the 28 major and minor pairs. The page is a research record of how those pairs have moved together. It does not place or recommend trades.</p>
+    <div class="banner">Research only</div>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="Analyses">
+    <button type="button" role="tab" id="tab-ols" aria-controls="panel-ols" aria-selected="true">OLS regression matrix</button>
+    <button type="button" role="tab" id="tab-kalman" aria-controls="panel-kalman" aria-selected="false">Kalman hedge &amp; spread</button>
+  </nav>
+
+  <section class="panel" id="panel-ols" role="tabpanel" aria-labelledby="tab-ols">
+    <div class="toolbar">
+      <div class="seg" id="ols-metrics" role="radiogroup" aria-label="Matrix metric">
+        <button type="button" role="radio" data-metric="beta" aria-checked="false">Beta</button>
+        <button type="button" role="radio" data-metric="r2" aria-checked="true">R²</button>
+        <button type="button" role="radio" data-metric="corr" aria-checked="false">Correlation</button>
+        <button type="button" role="radio" data-metric="p" aria-checked="false">Slope p</button>
+        <button type="button" role="radio" data-metric="adf" aria-checked="false" title="Log-price residual only">ADF p</button>
+        <button type="button" role="radio" data-metric="dw" aria-checked="false" title="Log-price residual only">Durbin–Watson</button>
+      </div>
+    </div>
+    <p class="note" id="ols-metric-note"></p>
+    <div class="split">
+      <article class="card">
+        <h2>Daily log returns</h2>
+        <p class="sub" id="ret-sub">y = a + b x on r = ln(P<sub>t</sub> / P<sub>t−1</sub>). Rows are Y, columns are X.</p>
+        <div class="legend" id="leg-ret"></div>
+        <div class="heat-wrap"><table class="heat" id="heat-ret"></table></div>
+      </article>
+      <article class="card">
+        <h2>Log prices</h2>
+        <p class="sub">ln Y = a + b ln X. Beta is the log hedge ratio. A gold outline is a likely spurious fit.</p>
+        <div class="legend" id="leg-px"></div>
+        <div class="heat-wrap"><table class="heat" id="heat-px"></table></div>
+      </article>
+    </div>
+    <div class="readout" id="ols-readout"></div>
+    <div class="split">
+      <article class="card">
+        <h2>Strongest return relationships</h2>
+        <p class="sub">Upper triangle, ranked by R². Click a row to locate it on the heatmap.</p>
+        <div class="table-wrap"><table class="data" id="table-ret"></table></div>
+      </article>
+      <article class="card">
+        <h2>Strongest log-price relationships</h2>
+        <p class="sub">Same orientation. Spurious means R² ≥ 0.5 and residual ADF p ≥ 0.05.</p>
+        <div class="table-wrap"><table class="data" id="table-px"></table></div>
+      </article>
+    </div>
+    <article class="card notes">
+      <h2>Method</h2>
+      <p>Both matrices use one window of 250 weekday sessions. Weekend bars are dropped, and any date that is missing a positive close on any of the 28 pairs is dropped. Nothing is interpolated or filled.</p>
+      <p>Returns are r = ln(P<sub>t</sub> / P<sub>t−1</sub>). Each ordered pair is regressed as y = a + b x. Beta is that slope. Correlation is the Pearson correlation of the two return series, and R² is the square of the regression correlation. The slope p-value is the two-sided t test. R², correlation, and the slope p-value are symmetric; beta is not. The diagonal is the pair against itself and is left neutral on the heatmap.</p>
+      <p>Log prices use ln of the same 250 closes: ln Y = a + b ln X. Beta is a log hedge ratio, an elasticity, so it is already comparable across pairs, including inverse quotes. The residual ln Y − a − b ln X is the log spread.</p>
+      <p>That residual is tested with an augmented Dickey–Fuller regression that includes a constant and chooses its lag by AIC. The p-value is the ordinary ADF p-value. It is slightly liberal next to MacKinnon cointegration critical values, and it is not a Johansen test. Durbin–Watson is computed on the same residual: values near 2 are consistent with an uncorrelated residual, and values near 0 are what a spurious regression in levels looks like.</p>
+      <p>A directed fit is marked likely spurious when R² is at least 0.5 and the residual ADF p-value is at least 0.05. ADF p and Durbin–Watson exist only on the log-price side. While either is selected, the returns heatmap stays on R². No trading signal is computed from these matrices.</p>
+    </article>
+  </section>
+
+  <section class="panel" id="panel-kalman" role="tabpanel" aria-labelledby="tab-kalman" hidden>
+    <p class="group-label">Stationarity of the tradeable spread</p>
+    <div class="cards" id="cards-main"></div>
+    <p class="group-label">Against the static OLS log spread</p>
+    <div class="cards" id="cards-cmp"></div>
+    <p class="group-label">Fits that need a second look</p>
+    <div class="cards" id="cards-flag"></div>
+
+    <div class="toolbar">
+      <div class="seg" id="kal-metrics" role="radiogroup" aria-label="Kalman metric">
+        <button type="button" role="radio" data-metric="adf" aria-checked="true">ADF p</button>
+        <button type="button" role="radio" data-metric="kpss" aria-checked="false">KPSS p</button>
+        <button type="button" role="radio" data-metric="hl" aria-checked="false">Half-life</button>
+        <button type="button" role="radio" data-metric="beta" aria-checked="false">Current beta</button>
+        <button type="button" role="radio" data-metric="z" aria-checked="false">Current z</button>
+        <button type="button" role="radio" data-metric="stab" aria-checked="false">Beta stability</button>
+        <button type="button" role="radio" data-metric="status" aria-checked="false">Kalman vs OLS</button>
+      </div>
+    </div>
+    <p class="note" id="kal-metric-note"></p>
+    <article class="card">
+      <h2>Hedge and spread map</h2>
+      <p class="sub" id="kal-sub"></p>
+      <div class="legend" id="leg-kal"></div>
+      <div class="heat-wrap"><table class="heat" id="heat-kal"></table></div>
+    </article>
+    <div class="readout" id="kal-readout"></div>
+
+    <article class="card">
+      <div class="toolbar">
+        <h2 id="kal-table-title">Stationary pairs</h2>
+        <div class="toggle seg" role="group" aria-label="Stationarity rule">
+          <button type="button" id="rule-both" aria-pressed="true">ADF and KPSS</button>
+          <button type="button" id="rule-adf" aria-pressed="false">ADF only</button>
+        </div>
+      </div>
+      <div class="controls">
+        <label class="field">Filter
+          <input id="pair-filter" type="search" placeholder="EURUSD, JPY…" autocomplete="off">
+        </label>
+      </div>
+      <div class="table-wrap"><table class="data" id="table-kal"></table></div>
+    </article>
+
+    <article class="card">
+      <div class="toolbar">
+        <div>
+          <h2>Beta and z-score</h2>
+          <p class="sub">Filtered beta and the tradeable-spread z-score for one pair. The dashed line on beta is the static OLS hedge. Lines on z mark 0 and ±2. The z-score is a description of the window, not an entry or exit rule.</p>
+        </div>
+        <label class="field">Pair
+          <select id="pair-select"></select>
+        </label>
+      </div>
+      <div class="split charts">
+        <div>
+          <h3>Filtered beta</h3>
+          <svg id="chart-beta" role="img" aria-label="Filtered hedge ratio"></svg>
+        </div>
+        <div>
+          <h3>Spread z-score</h3>
+          <svg id="chart-z" role="img" aria-label="Spread z-score"></svg>
+        </div>
+      </div>
+    </article>
+
+    <article class="card notes">
+      <h2>Method and caveats</h2>
+      <p>Each cell above the diagonal is one unordered pair, oriented as Y = row and X = column, with the row earlier than the column in the pair list. That is 378 pairs, the same upper triangle as the OLS matrix. The lower triangle is not a second estimate. Beta is not symmetric, so it is not mirrored.</p>
+      <p>The state is a random-walk intercept and hedge ratio: ln Y<sub>t</sub> = α<sub>t</sub> + β<sub>t</sub> ln X<sub>t</sub> + e<sub>t</sub>. Observation variance and the two state variances are estimated by the Shumway–Stoffer EM algorithm on the 500 weekday closes that end the day before this window, then frozen. The filter then runs through that sample and the 250-day window. Current beta is the filtered hedge ratio on the last day. Beta stability is the standard deviation of that filtered beta over the window, divided by the absolute value of its mean.</p>
+      <p>The series under test is the tradeable re-hedged spread. It starts at 0 on the first day of the window and adds Δln Y − β<sub>t|t−1</sub> Δln X each day, using the hedge ratio known before that close. There is no look-ahead in the hedge.</p>
+      <p>The level residual ln Y − α<sub>t|t−1</sub> − β<sub>t|t−1</sub> ln X is the filter’s own innovation, so a stationarity test on it mostly restates the filter. On this run the median half-life of that innovation is <span id="innov-hl">…</span>, and <span id="innov-adf-n">…</span> of 378 innovations have ADF p &lt; 0.05. The median half-life of the level form that drops the intercept is <span id="level-hl">…</span>. Neither number is the stationarity verdict.</p>
+      <ul>
+        <li>ADF uses the same constant and AIC lag as the OLS residual. KPSS is run on the level of the spread with a constant and automatic bandwidth. Statsmodels caps those p-values at 0.01 and 0.10, so a printed 0.10 means “0.10 or larger”.</li>
+        <li>Half-life comes from ΔS<sub>t</sub> = a + b S<sub>t−1</sub>, as −ln 2 / ln(1+b). It is blank when b is outside (−1, 0), which means that AR(1) is not mean-reverting. Hurst is the slope of log standard deviation of lagged differences against log lag, for lags 2 to 20.</li>
+        <li>The z-score subtracts the 250-day mean and divides by the 250-day sample standard deviation. It says where the spread sits inside its own window.</li>
+        <li>The default table calls a pair stationary when ADF p &lt; 0.05 and KPSS p &gt; 0.05. ADF only drops the KPSS requirement. The “Kalman vs OLS” colours use that default Kalman rule against an ADF p &lt; 0.05 on the static OLS log spread, fit on the same window.</li>
+        <li>Static beta means the filtered beta’s standard deviation is under 0.5% of its absolute mean, or the EM beta noise-to-signal ratio q<sub>β</sub> / V<sub>e</sub> is under 10<sup>−9</sup>. The hedge barely moved.</li>
+        <li>Weak hedge means the absolute filtered beta stays below 0.1 for the whole window, so the spread is close to Y alone. If that leg’s own log price also passes ADF, the pair result is mostly the leg.</li>
+        <li>The latest daily bar can still be in progress if this file was built while the FX session was open. The scheduled rebuild runs at 22:30 UTC (00:30 SAST the next calendar day), after the New York close.</li>
+      </ul>
+    </article>
+  </section>
+
+  <footer>
+    <p id="foot"></p>
+  </footer>
+</div>
+<div class="tip" id="tip" hidden></div>
+<script id="payload" type="application/json">__DATA__</script>
+<script>
+__JS__
+</script>
+</body>
+</html>
