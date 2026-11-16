@@ -23,6 +23,8 @@ Z_WATCH = 1.5
 DUP_CORR = 0.8
 ROLL_WIN = 120
 STALE_DAYS = 3
+# Shown as "Rolling agrees": same sign as the Kalman z, and stretched.
+ROLL_AGREE_ABS = 1.5
 
 
 def currencies_of(pair: str) -> tuple[str, str]:
@@ -40,6 +42,18 @@ def _finite(value) -> bool:
 def eligible(row: dict) -> bool:
     hl = row.get("hl")
     return bool(row.get("kStat")) and _finite(hl) and HL_MIN <= float(hl) <= HL_MAX
+
+
+def rolling_agrees(row: dict) -> bool:
+    """120-day rolling OLS z matches the Kalman sign and |z| is at least 1.5."""
+    z = row.get("z")
+    rz = row.get("rollZNow")
+    if not _finite(z) or not _finite(rz):
+        return False
+    zf, rzf = float(z), float(rz)
+    if zf == 0 or rzf == 0:
+        return False
+    return (zf > 0) == (rzf > 0) and abs(rzf) >= ROLL_AGREE_ABS
 
 
 def direction(z: float) -> str:
@@ -100,6 +114,7 @@ def _public_row(row: dict, similar: list[dict]) -> dict:
         "kpss": row["kpss"],
         "hurst": row["hurst"],
         "rollPass": bool(row["rollPass"]),
+        "rollingAgrees": rolling_agrees(row),
         "rollStat": bool(row["rollStat"]),
         "rollZNow": row["rollZNow"],
         "rollAdf": row["rollAdf"],
@@ -129,6 +144,8 @@ def build_screen(records: list[dict]) -> dict:
             "zWatchMin": Z_WATCH,
             "duplicateCorr": DUP_CORR,
             "rollWindow": ROLL_WIN,
+            "rollingAgreesAbs": ROLL_AGREE_ABS,
+            "rollingAgreesRule": "same sign as the Kalman z and |rolling OLS z| >= 1.5",
             "staleDays": STALE_DAYS,
         },
         "opportunities": [
@@ -163,6 +180,11 @@ def assert_screen(records: list[dict], screen: dict) -> None:
             raise SystemExit(f"{row['y']}/{row['x']} half-life is outside 3–30 days.")
         if abs(float(row["z"])) < Z_OPP:
             raise SystemExit(f"{row['y']}/{row['x']} |z| is below 2.")
+        if bool(row["rollingAgrees"]) != rolling_agrees(row):
+            raise SystemExit(f"Rolling-agrees flag is wrong for {row['y']}/{row['x']}.")
+    for row in screen["watchlist"]:
+        if bool(row["rollingAgrees"]) != rolling_agrees(row):
+            raise SystemExit(f"Rolling-agrees flag is wrong for {row['y']}/{row['x']}.")
         for other in row["similar"]:
             if float(other["corr"]) <= DUP_CORR:
                 raise SystemExit(f"Similar-pair correlation is not above {DUP_CORR}.")

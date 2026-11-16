@@ -13,6 +13,14 @@ The generated file is one self-contained `site/index.html` (vanilla JS and SVG, 
 
 EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD, NZDUSD, EURGBP, EURJPY, EURCHF, EURAUD, EURCAD, EURNZD, GBPJPY, GBPCHF, GBPAUD, GBPCAD, GBPNZD, AUDJPY, AUDCHF, AUDCAD, AUDNZD, NZDJPY, NZDCHF, NZDCAD, CADJPY, CADCHF, CHFJPY.
 
+## Landing page
+
+The page opens on one table of pairs that pass the Kalman screen (ADF p < 0.05, KPSS p > 0.05, half-life 3–30 days, |z| ≥ 2), sorted by |z|. A watchlist underneath uses the same stationarity and half-life filters with 1.5 ≤ |z| < 2. Columns are the pair, Kalman z, half-life, current beta, and Rolling agrees.
+
+Rolling agrees is yes when the 120-day rolling OLS z has the same sign as the Kalman z and |rolling z| ≥ 1.5. The older rolling stationarity flag is still computed and stored; it is not the column on the landing table.
+
+Clicking a row opens `#pair=EURUSD_GBPUSD` with the Kalman z-score and lines at 0 and ±2. The OLS and Kalman matrices, currency overlap, and method notes are behind **More** (`#more`). The header says “Research only, not trading advice” and “Data as of …”. A warning appears when that timestamp is more than three days old.
+
 ## Opportunities
 
 The landing view is a research screen, not a trade list. A pair is an opportunity only when all of these hold on the Kalman tradeable spread:
