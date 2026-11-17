@@ -1,13 +1,14 @@
 "use strict";
 
 const DATA = JSON.parse(document.getElementById("payload").textContent);
-const PAIRS = DATA.pairs;
+const FX_READY = !!(DATA.pairs && DATA.pairs.length === 28 && DATA.ols && DATA.kalman && DATA.kalman.records && DATA.kalman.records.length === 378);
+const PAIRS = FX_READY ? DATA.pairs : [];
 const N = PAIRS.length;
-const OLS = DATA.ols;
-const KAL = DATA.kalman;
-const SCREEN = DATA.screen;
-const SPUR = new Set(OLS.spurious.map(function (p) { return p[0] + "," + p[1]; }));
-const REC = new Map(KAL.records.map(function (r) { return [r.i + "," + r.j, r]; }));
+const OLS = FX_READY ? DATA.ols : null;
+const KAL = FX_READY ? DATA.kalman : null;
+const SCREEN = FX_READY ? DATA.screen : null;
+const SPUR = FX_READY ? new Set(OLS.spurious.map(function (p) { return p[0] + "," + p[1]; })) : new Set();
+const REC = FX_READY ? new Map(KAL.records.map(function (r) { return [r.i + "," + r.j, r]; })) : new Map();
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const NS = "http://www.w3.org/2000/svg";
 
@@ -160,8 +161,14 @@ function showPanels(which) {
   document.getElementById("panel-opp").hidden = which !== "opp";
   document.getElementById("panel-full").hidden = which !== "full";
   document.getElementById("panel-pair").hidden = which !== "pair";
+  hideAssetRoot();
+  setAssetNav("fx");
+  restoreFxChrome();
   const more = document.getElementById("more-link");
-  if (more) more.hidden = which === "full";
+  if (more) {
+    more.hidden = which === "full";
+    more.href = "#more";
+  }
 }
 
 function selectSub(name) {
@@ -181,6 +188,27 @@ function selectTab(name) {
 
 function route() {
   const hash = location.hash || "#opportunities";
+  if (hash === "#commodities" || hash === "#commodities-more" || hash.indexOf("#c-pair=") === 0) {
+    showAsset("commodities", hash);
+    return;
+  }
+  if (hash === "#stocks" || hash === "#stocks-more" || hash.indexOf("#s-pair=") === 0) {
+    showAsset("stocks", hash);
+    return;
+  }
+  if (!FX_READY) {
+    hideAssetRoot();
+    setAssetNav("fx");
+    document.getElementById("panel-opp").hidden = true;
+    document.getElementById("panel-full").hidden = true;
+    document.getElementById("panel-pair").hidden = true;
+    const more = document.getElementById("more-link");
+    if (more) more.hidden = true;
+    const err = document.getElementById("fx-error");
+    err.hidden = false;
+    err.textContent = DATA.fxError || "FX data is not in this snapshot.";
+    return;
+  }
   if (hash.indexOf("#pair=") === 0) {
     const rec = findRecord(decodeURIComponent(hash.slice(6)));
     if (!rec) {
@@ -847,7 +875,8 @@ function drawChart(svg, values, opt) {
       "text-anchor": t === 0 ? "start" : t === tickN ? "end" : "middle",
       "font-family": "ui-monospace, monospace"
     });
-    label.textContent = shortDate(KAL.windowDates[i]);
+    const axis = opt.dates || (KAL && KAL.windowDates) || [];
+    label.textContent = axis[i] ? shortDate(axis[i]) : "";
     svg.append(label);
   }
   (opt.refs || []).forEach(function (ref) {
@@ -1063,6 +1092,13 @@ function bind() {
     const parts = event.target.value.split(",");
     selectKal(Number(parts[0]), Number(parts[1]), false);
   });
+  document.getElementById("asset-sector").addEventListener("change", function (event) {
+    assetSector = event.target.value || "All";
+    renderAssetAll(assetBlock(assetKey));
+  });
+  document.getElementById("asset-filter").addEventListener("input", function () {
+    renderAssetAll(assetBlock(assetKey));
+  });
   window.addEventListener("hashchange", route);
 }
 
@@ -1081,11 +1117,482 @@ function setRule(rule) {
   if (selKal) selectKal(selKal.i, selKal.j, false);
 }
 
+let fxChrome = null;
+let assetKey = "commodities";
+let assetSort = { key: "absz", dir: -1 };
+let assetSector = "All";
+let assetHomeKey = "";
+
+function hideAssetRoot() {
+  const root = document.getElementById("asset-root");
+  if (root) root.hidden = true;
+}
+
+function setAssetNav(key) {
+  ["fx", "commodities", "stocks"].forEach(function (name) {
+    const el = document.getElementById("nav-" + name);
+    if (!el) return;
+    if (name === key) el.setAttribute("aria-current", "page");
+    else el.removeAttribute("aria-current");
+  });
+}
+
+function staleLimit() {
+  return (SCREEN && SCREEN.rules && SCREEN.rules.staleDays) || 3;
+}
+
+function applyStale(stamp) {
+  const stale = document.getElementById("stale");
+  if (!stale) return;
+  const parsed = stamp ? parseSast(stamp) : null;
+  stale.hidden = !(parsed && Date.now() - parsed.getTime() > staleLimit() * 86400000);
+}
+
+function snapshotFxChrome() {
+  fxChrome = {
+    eyebrow: document.querySelector(".eyebrow").textContent,
+    h1: document.querySelector("h1").textContent,
+    title: document.title,
+    asof: document.getElementById("asof").textContent,
+    foot: document.getElementById("foot").textContent
+  };
+}
+
+function restoreFxChrome() {
+  if (!fxChrome) return;
+  document.querySelector(".eyebrow").textContent = fxChrome.eyebrow;
+  document.querySelector("h1").textContent = fxChrome.h1;
+  document.title = fxChrome.title;
+  document.getElementById("asof").textContent = fxChrome.asof;
+  document.getElementById("foot").textContent = fxChrome.foot;
+  applyStale(DATA.generatedAtSast);
+}
+
+function assetBlock(key) {
+  const block = DATA[key];
+  if (!block) {
+    return {
+      error: "This snapshot has no " + key + " data.",
+      pairs: [],
+      dropped: [],
+      dateSets: [],
+      warnings: []
+    };
+  }
+  return block;
+}
+
+function assetHome(key) {
+  return key === "stocks" ? "#stocks" : "#commodities";
+}
+
+function assetLines(row) {
+  if (assetKey === "commodities") return [row.yName + " / " + row.xName, row.y + " / " + row.x];
+  return [row.y + " / " + row.x, (row.yName || "") + " / " + (row.xName || "")];
+}
+
+function hideFxPanels() {
+  document.getElementById("panel-opp").hidden = true;
+  document.getElementById("panel-full").hidden = true;
+  document.getElementById("panel-pair").hidden = true;
+}
+
+function byAbsZ(rows) {
+  return rows.slice().sort(function (a, b) {
+    const av = finite(a.z) ? Math.abs(a.z) : -1;
+    const bv = finite(b.z) ? Math.abs(b.z) : -1;
+    return bv - av;
+  });
+}
+
+function pairCell(row) {
+  const td = document.createElement("td");
+  td.className = "left pair";
+  const lines = assetLines(row);
+  const main = document.createElement("span");
+  main.textContent = lines[0];
+  td.append(main);
+  if (lines[1]) {
+    const sub = document.createElement("span");
+    sub.className = "subname";
+    sub.textContent = lines[1];
+    td.append(sub);
+  }
+  return td;
+}
+
+function textCell(text, left) {
+  const td = document.createElement("td");
+  if (left) td.className = "left";
+  td.textContent = text;
+  return td;
+}
+
+function renderAssetScreenTable(table, rows) {
+  table.replaceChildren();
+  if (!rows.length) return;
+  const heads = ["Pair", "Kalman z", "Half-life", "Beta", "Rolling agrees"];
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  heads.forEach(function (name, idx) {
+    const th = document.createElement("th");
+    if (idx === 0 || idx === 4) th.className = "left";
+    th.textContent = name;
+    hr.append(th);
+  });
+  thead.append(hr);
+  const tb = document.createElement("tbody");
+  rows.forEach(function (row) {
+    const tr = document.createElement("tr");
+    tr.addEventListener("click", function () { openAssetPair(row); });
+    tr.append(pairCell(row));
+    tr.append(textCell(fmt(row.z, 3), false));
+    tr.append(textCell(finite(row.hl) ? fmt(row.hl, 3) : "—", false));
+    tr.append(textCell(fmt(row.betaNow, 4), false));
+    tr.append(textCell(row.rollingAgrees ? "Yes" : "No", true));
+    tb.append(tr);
+  });
+  table.append(thead, tb);
+}
+
+function assetRank(row, key) {
+  if (key === "pair") return (assetKey === "commodities" ? (row.yName || "") + (row.xName || "") : row.y + row.x).toLowerCase();
+  if (key === "name") return ((row.yName || "") + " " + (row.xName || "")).toLowerCase();
+  if (key === "absz") return finite(row.z) ? Math.abs(row.z) : null;
+  if (key === "status") return row.status === "opportunity" ? 3 : row.status === "watchlist" ? 2 : 1;
+  if (key === "agrees") return row.rollingAgrees ? 1 : 0;
+  if (key === "why") return row.why || "";
+  if (key === "sector") return row.sector || "";
+  const value = row[key];
+  return finite(value) ? value : null;
+}
+
+function sortAssetRows(rows) {
+  const key = assetSort.key;
+  const dir = assetSort.dir;
+  return rows.slice().sort(function (a, b) {
+    const av = assetRank(a, key);
+    const bv = assetRank(b, key);
+    const aMiss = av === null || av === "";
+    const bMiss = bv === null || bv === "";
+    if (aMiss && bMiss) return 0;
+    if (aMiss) return 1;
+    if (bMiss) return -1;
+    if (av < bv) return -dir;
+    if (av > bv) return dir;
+    return 0;
+  });
+}
+
+function defaultAssetDir(key) {
+  if (key === "pair" || key === "name" || key === "sector" || key === "why") return 1;
+  return -1;
+}
+
+function sortHeader(label, key, left) {
+  const th = document.createElement("th");
+  if (left) th.className = "left";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  const mark = assetSort.key === key ? (assetSort.dir < 0 ? " ↓" : " ↑") : "";
+  btn.textContent = label + mark;
+  btn.addEventListener("click", function () {
+    if (assetSort.key === key) assetSort.dir = -assetSort.dir;
+    else assetSort = { key: key, dir: defaultAssetDir(key) };
+    renderAssetAll(assetBlock(assetKey));
+  });
+  th.append(btn);
+  return th;
+}
+
+function statusText(row) {
+  if (row.status === "opportunity") return "Opportunity";
+  if (row.status === "watchlist") return "Watchlist";
+  return "Fails";
+}
+
+function renderAssetAll(block) {
+  const table = document.getElementById("table-asset-all");
+  const rows = block.pairs || [];
+  document.getElementById("asset-all-title").textContent = "All tested pairs · " + rows.length;
+  const warn = (block.warnings || []).join(" ");
+  document.getElementById("asset-all-sub").textContent =
+    "Every pair that was tested, including the ones that fail a gate." + (warn ? " " + warn : "");
+  const q = document.getElementById("asset-filter").value.trim().toLowerCase();
+  const filtered = rows.filter(function (row) {
+    if (assetKey === "stocks" && assetSector !== "All" && row.sector !== assetSector) return false;
+    if (!q) return true;
+    const blob = [row.y, row.x, row.yName, row.xName, row.sector, row.why, row.status].join(" ").toLowerCase();
+    return blob.indexOf(q) !== -1;
+  });
+  document.getElementById("asset-all-empty").hidden = filtered.length > 0;
+  table.replaceChildren();
+  if (!filtered.length) return;
+  const stocks = assetKey === "stocks";
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  hr.append(sortHeader("Pair", "pair", true));
+  if (stocks) {
+    hr.append(sortHeader("Sector", "sector", true));
+    hr.append(sortHeader("Corr", "corr", false));
+  }
+  hr.append(sortHeader("Status", "status", true));
+  hr.append(sortHeader("Kalman z", "absz", false));
+  hr.append(sortHeader("Half-life", "hl", false));
+  hr.append(sortHeader("ADF", "adf", false));
+  hr.append(sortHeader("KPSS", "kpss", false));
+  hr.append(sortHeader("Beta", "betaNow", false));
+  hr.append(sortHeader("Rolling z", "rollZNow", false));
+  hr.append(sortHeader("Rolling agrees", "agrees", true));
+  hr.append(sortHeader("Why", "why", true));
+  thead.append(hr);
+  const tb = document.createElement("tbody");
+  sortAssetRows(filtered).forEach(function (row) {
+    const tr = document.createElement("tr");
+    tr.addEventListener("click", function () { openAssetPair(row); });
+    tr.append(pairCell(row));
+    if (stocks) {
+      tr.append(textCell(row.sector || "—", true));
+      tr.append(textCell(fmt(row.corr, 3), false));
+    }
+    tr.append(textCell(statusText(row), true));
+    tr.append(textCell(fmt(row.z, 3), false));
+    tr.append(textCell(finite(row.hl) ? fmt(row.hl, 3) : "—", false));
+    tr.append(textCell(fmtP(row.adf), false));
+    tr.append(textCell(fmtP(row.kpss), false));
+    tr.append(textCell(fmt(row.betaNow, 4), false));
+    tr.append(textCell(fmt(row.rollZNow, 3), false));
+    tr.append(textCell(row.rollingAgrees ? "Yes" : "No", true));
+    const why = document.createElement("td");
+    why.className = "left wrap";
+    why.textContent = row.why || "—";
+    tr.append(why);
+    tb.append(tr);
+  });
+  table.append(thead, tb);
+}
+
+function fillAssetSectors(block) {
+  const field = document.getElementById("asset-sector-field");
+  const select = document.getElementById("asset-sector");
+  const stocks = assetKey === "stocks";
+  field.hidden = !stocks;
+  if (!stocks) return;
+  const previous = assetSector;
+  select.replaceChildren();
+  const all = document.createElement("option");
+  all.value = "All";
+  all.textContent = "All sectors";
+  select.append(all);
+  const seen = {};
+  (block.sectors || []).forEach(function (item) {
+    if (!item.sector || seen[item.sector]) return;
+    seen[item.sector] = true;
+    const opt = document.createElement("option");
+    opt.value = item.sector;
+    opt.textContent = item.sector + " (" + item.tested + ")";
+    select.append(opt);
+  });
+  (block.pairs || []).forEach(function (row) {
+    if (!row.sector || seen[row.sector]) return;
+    seen[row.sector] = true;
+    const opt = document.createElement("option");
+    opt.value = row.sector;
+    opt.textContent = row.sector;
+    select.append(opt);
+  });
+  const keep = previous && seen[previous];
+  assetSector = keep ? previous : "All";
+  select.value = assetSector;
+}
+
+function renderDropped(block) {
+  const card = document.getElementById("asset-dropped-card");
+  const dropped = block.dropped || [];
+  card.hidden = dropped.length === 0;
+  document.getElementById("asset-dropped-title").textContent = "Dropped tickers · " + dropped.length;
+  const table = document.getElementById("table-asset-dropped");
+  table.replaceChildren();
+  if (!dropped.length) return;
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  ["Ticker", "Company", "Sector", "Reason"].forEach(function (name) {
+    const th = document.createElement("th");
+    th.className = "left";
+    th.textContent = name;
+    hr.append(th);
+  });
+  thead.append(hr);
+  const tb = document.createElement("tbody");
+  dropped.forEach(function (row) {
+    const tr = document.createElement("tr");
+    tr.append(textCell(row.ticker, true));
+    tr.append(textCell(row.name, true));
+    tr.append(textCell(row.sector, true));
+    const why = document.createElement("td");
+    why.className = "left wrap";
+    why.textContent = row.reason || "";
+    tr.append(why);
+    tb.append(tr);
+  });
+  table.append(thead, tb);
+}
+
+function renderAssetHome(block) {
+  if (assetHomeKey !== assetKey) {
+    assetSort = { key: "absz", dir: -1 };
+    assetSector = "All";
+    document.getElementById("asset-filter").value = "";
+    assetHomeKey = assetKey;
+  }
+  fillAssetSectors(block);
+  const opps = byAbsZ((block.pairs || []).filter(function (row) { return row.status === "opportunity"; }));
+  const watch = byAbsZ((block.pairs || []).filter(function (row) { return row.status === "watchlist"; }));
+  document.getElementById("asset-opp-title").textContent = "Opportunities · " + opps.length;
+  document.getElementById("asset-watch-title").textContent = "Watchlist · " + watch.length;
+  document.getElementById("asset-opp-empty").hidden = opps.length > 0;
+  document.getElementById("asset-watch-empty").hidden = watch.length > 0;
+  renderAssetScreenTable(document.getElementById("table-asset-opp"), opps);
+  renderAssetScreenTable(document.getElementById("table-asset-watch"), watch);
+  renderAssetAll(block);
+  renderDropped(block);
+}
+
+function openAssetPair(row) {
+  location.hash = (assetKey === "stocks" ? "#s-pair=" : "#c-pair=") + encodeURIComponent(row.id);
+}
+
+function renderAssetPair(block, hash) {
+  const rowId = decodeURIComponent(hash.slice("#c-pair=".length));
+  let row = null;
+  (block.pairs || []).forEach(function (item) { if (item.id === rowId) row = item; });
+  if (!row) {
+    const home = assetHome(assetKey);
+    history.replaceState(null, "", home);
+    showAsset(assetKey, home);
+    return;
+  }
+  const lines = assetLines(row);
+  document.getElementById("asset-pair-title").textContent = lines[0];
+  document.getElementById("asset-pair-orient").textContent =
+    (lines[1] ? lines[1] + ". " : "") + "Kalman spread z-score. Lines at 0 and ±2. Research only, not trading advice.";
+  const dates = (block.dateSets || [])[row.dateSet] || [];
+  drawChart(document.getElementById("chart-asset-z"), row.zSeries || [], {
+    color: "#8eb7ff",
+    dates: dates,
+    refs: [
+      { value: 2, color: "#e08a8a", label: "+2" },
+      { value: -2, color: "#e08a8a", label: "−2" },
+      { value: 0, color: "#66758a", dash: "2 3", label: "0" }
+    ]
+  });
+}
+
+function addParagraph(parent, text) {
+  if (!text) return;
+  const p = document.createElement("p");
+  p.textContent = text;
+  parent.append(p);
+}
+
+function renderAssetMore(block) {
+  const body = document.getElementById("asset-howto");
+  body.replaceChildren();
+  addParagraph(body, "An opportunity passes every filter on the Kalman tradeable spread: ADF p < 0.05, KPSS not rejected (p > 0.05), half-life from 3 to 30 trading days, and a current |z| of at least 2. Rolling agrees means the 120-day rolling OLS z has the same sign as the Kalman z and |rolling z| is at least 1.5.");
+  addParagraph(body, "Each pair is lined up on its own common trading days. Non-positive prices are dropped, and today's incomplete daily bar is dropped. Closes are natural logs. The Kalman variances are estimated on the first 500 of the last 750 common sessions and then frozen. The tested spread is the cumulative sum of the daily change in ln Y minus the predicted hedge ratio times the daily change in ln X, over the final 250 sessions. The z-score uses that 250-day mean and sample standard deviation.");
+  addParagraph(body, "The rolling OLS z is fit on the 120 closes before the last one and applied to that last close. It is the log-price residual divided by the residual standard deviation of that fit. Rolling agrees when this z has the same sign as the Kalman z and its absolute value is at least 1.5.");
+  addParagraph(body, block.lead);
+  addParagraph(body, block.multipleTesting);
+  addParagraph(body, block.universeNote);
+  if (block.catalog && block.catalog.length) {
+    addParagraph(body, block.catalog.map(function (row) {
+      return row.yName + "/" + row.xName + " (" + row.y + "/" + row.x + ")";
+    }).join("; ") + ".");
+  }
+  if (block.sectors && block.sectors.length) {
+    addParagraph(body, "Pairs tested by sector: " + block.sectors.map(function (item) {
+      return item.sector + " " + item.tested;
+    }).join(", ") + ".");
+  }
+  (block.warnings || []).forEach(function (note) { addParagraph(body, note); });
+}
+
+function applyAssetChrome(key, block) {
+  const copy = key === "stocks"
+    ? { eyebrow: "Equities · research", h1: "S&P 500 pairs", title: "S&P 500 research dashboard" }
+    : { eyebrow: "Commodities · research", h1: "Commodity pairs", title: "Commodity research dashboard" };
+  document.querySelector(".eyebrow").textContent = copy.eyebrow;
+  document.querySelector("h1").textContent = copy.h1;
+  document.title = copy.title;
+  const stamp = block.generatedAtSast || DATA.generatedAtSast;
+  let asof = "Data as of " + (stamp ? prettyStamp(stamp) : "—");
+  if (block.priceStart && block.priceEnd) asof += " · window " + block.priceStart + " → " + block.priceEnd;
+  if (block.source) asof += " · " + block.source;
+  document.getElementById("asof").textContent = asof;
+  document.getElementById("foot").textContent =
+    "Generated " + (stamp ? prettyStamp(stamp) : "—") +
+    " · " + (block.nTested || 0) + " pairs" +
+    (block.source ? " · " + block.source : "") +
+    " · Africa/Johannesburg (SAST, UTC+2). Research only, not trading advice.";
+  applyStale(stamp);
+}
+
+function showAsset(key, hash) {
+  assetKey = key;
+  const block = assetBlock(key);
+  hideFxPanels();
+  document.getElementById("asset-root").hidden = false;
+  setAssetNav(key);
+  applyAssetChrome(key, block);
+  const failed = !!block.error;
+  const err = document.getElementById("asset-error");
+  err.hidden = !failed;
+  err.textContent = failed ? block.error : "";
+  const lead = document.getElementById("asset-lead");
+  lead.hidden = failed || !block.lead;
+  lead.textContent = block.lead || "";
+  const testing = document.getElementById("asset-testing");
+  const showNote = !failed && !!block.multipleTesting;
+  testing.hidden = !showNote;
+  testing.textContent = showNote ? block.multipleTesting : "";
+  let view = "home";
+  if (!failed && (hash.indexOf("#c-pair=") === 0 || hash.indexOf("#s-pair=") === 0)) view = "pair";
+  if (!failed && (hash === "#commodities-more" || hash === "#stocks-more")) view = "more";
+  document.getElementById("panel-asset").hidden = view !== "home" || failed;
+  document.getElementById("panel-asset-pair").hidden = view !== "pair";
+  document.getElementById("panel-asset-more").hidden = view !== "more";
+  const more = document.getElementById("more-link");
+  if (more) {
+    more.href = key === "stocks" ? "#stocks-more" : "#commodities-more";
+    more.hidden = view === "more" || failed;
+  }
+  const home = assetHome(key);
+  document.getElementById("asset-back").setAttribute("href", home);
+  document.getElementById("asset-more-back").setAttribute("href", home);
+  if (failed) return;
+  if (view === "home") renderAssetHome(block);
+  if (view === "pair") renderAssetPair(block, hash);
+  if (view === "more") renderAssetMore(block);
+  window.scrollTo(0, 0);
+}
+
 function init() {
+  if (DATA.fxError) {
+    const err = document.getElementById("fx-error");
+    err.hidden = false;
+    err.textContent = DATA.fxError;
+  }
+  if (!FX_READY) {
+    document.getElementById("asof").textContent = DATA.fxError ? "Data as of —" : document.getElementById("asof").textContent;
+    bind();
+    route();
+    return;
+  }
   if (N !== 28 || KAL.records.length !== 378) {
     throw new Error("Dashboard payload is not the 28-pair universe.");
   }
   fillMeta();
+  snapshotFxChrome();
   fillCards();
   buildHeat(document.getElementById("heat-ret"), "ols");
   buildHeat(document.getElementById("heat-px"), "ols");
