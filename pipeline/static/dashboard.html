@@ -13,6 +13,11 @@ __CSS__
 <body>
 <div class="wrap">
   <header>
+    <nav class="asset-nav" aria-label="Asset class">
+      <a href="#opportunities" id="nav-fx" aria-current="page">FX</a>
+      <a href="#commodities" id="nav-commodities">Commodities</a>
+      <a href="#stocks" id="nav-stocks">Stocks</a>
+    </nav>
     <div class="topbar">
       <div>
         <p class="eyebrow">Foreign exchange · research</p>
@@ -23,6 +28,7 @@ __CSS__
     <div class="banner" id="research-banner">Research only, not trading advice</div>
     <p class="asof" id="asof">Data as of …</p>
     <p class="stale" id="stale" hidden>This snapshot is more than 3 days old. The figures are from the timestamp above, not from a live feed.</p>
+    <p class="stale" id="fx-error" hidden></p>
   </header>
 
   <section class="panel" id="panel-opp" role="tabpanel">
@@ -197,6 +203,60 @@ __CSS__
     </article>
   </section>
   </section>
+
+  <div id="asset-root" hidden>
+    <p class="note" id="asset-lead" hidden></p>
+    <p class="callout" id="asset-testing" hidden></p>
+    <p class="stale" id="asset-error" hidden></p>
+    <section class="panel" id="panel-asset">
+      <article class="card">
+        <h2 id="asset-opp-title">Opportunities</h2>
+        <p class="sub">Kalman spread: ADF p &lt; 0.05, KPSS not rejected, half-life 3–30 days, |z| ≥ 2. Sorted by |z|. Rolling agrees means the 120-day rolling OLS z has the same sign and |z| ≥ 1.5.</p>
+        <p class="empty" id="asset-opp-empty" hidden>No pair passes every filter on this snapshot.</p>
+        <div class="table-wrap"><table class="data" id="table-asset-opp"></table></div>
+      </article>
+      <article class="card">
+        <h2 id="asset-watch-title">Watchlist</h2>
+        <p class="sub">Same stationarity and half-life filters, with 1.5 ≤ |z| &lt; 2.</p>
+        <p class="empty" id="asset-watch-empty" hidden>No pair sits in that z-score band on this snapshot.</p>
+        <div class="table-wrap"><table class="data" id="table-asset-watch"></table></div>
+      </article>
+      <article class="card">
+        <h2 id="asset-all-title">All tested pairs</h2>
+        <p class="sub" id="asset-all-sub">Every pair that was tested, including the ones that fail a gate.</p>
+        <div class="controls">
+          <label class="field" id="asset-sector-field" hidden>Sector
+            <select id="asset-sector"></select>
+          </label>
+          <label class="field">Filter
+            <input id="asset-filter" type="search" placeholder="Name, ticker, reason…" autocomplete="off">
+          </label>
+        </div>
+        <p class="empty" id="asset-all-empty" hidden>No pair matches that filter.</p>
+        <div class="table-wrap"><table class="data" id="table-asset-all"></table></div>
+      </article>
+      <article class="card" id="asset-dropped-card" hidden>
+        <h2 id="asset-dropped-title">Dropped tickers</h2>
+        <p class="sub">These names are not in the pairs above.</p>
+        <div class="table-wrap"><table class="data static" id="table-asset-dropped"></table></div>
+      </article>
+    </section>
+    <section class="panel" id="panel-asset-pair" hidden>
+      <p><a class="text-btn" id="asset-back" href="#commodities">Back</a></p>
+      <article class="card">
+        <h2 id="asset-pair-title">Pair</h2>
+        <p class="sub" id="asset-pair-orient">Kalman spread z-score. Lines at 0 and ±2. Research only, not trading advice.</p>
+        <svg id="chart-asset-z" role="img" aria-label="Kalman spread z-score"></svg>
+      </article>
+    </section>
+    <section class="panel" id="panel-asset-more" hidden>
+      <p><a class="text-btn" id="asset-more-back" href="#commodities">Back</a></p>
+      <details class="howto" open>
+        <summary>How to read this</summary>
+        <div class="howto-body" id="asset-howto"></div>
+      </details>
+    </section>
+  </div>
 
   <footer>
     <p class="banner foot">Research only, not trading advice</p>

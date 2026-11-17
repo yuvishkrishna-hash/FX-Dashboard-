@@ -173,6 +173,74 @@ def compute_pair(i: int, j: int, ly: np.ndarray, lx: np.ndarray) -> dict:
     }
 
 
+def level_rolling_z(ly: np.ndarray, lx: np.ndarray, win: int = ROLL_WIN) -> float:
+    """OLS log-price residual at the last close.
+
+    The line is fit on ``[t−win, t)`` and applied at ``t``. The residual is
+    divided by that fit's sample residual standard deviation (ddof=1).
+    """
+    ly = np.asarray(ly, float)
+    lx = np.asarray(lx, float)
+    t = len(ly) - 1
+    if t < win:
+        return float("nan")
+    fit = km.ols_fit(ly[t - win : t], lx[t - win : t])
+    sd = fit["sd"]
+    if not np.isfinite(sd) or sd <= 0:
+        return float("nan")
+    return float((ly[t] - fit["a"] - fit["b"] * lx[t]) / sd)
+
+
+def run_log_pair(ly: np.ndarray, lx: np.ndarray, y_name: str, x_name: str) -> dict:
+    """One pair through the same Kalman spread as the FX screen.
+
+    ``rollZNow`` is then replaced with the 120-day level residual z. The FX
+    page keeps the cumulative rolling-spread z that ``compute_pair`` stores.
+    """
+    ly = np.asarray(ly, float)
+    lx = np.asarray(lx, float)
+    row = compute_pair(0, 1, ly, lx)
+    row["y"] = y_name
+    row["x"] = x_name
+    row["rollZNow"] = level_rolling_z(ly, lx)
+    return row
+
+
+def _run_named_job(job: tuple) -> dict:
+    y_name, x_name, ly, lx = job
+    try:
+        return run_log_pair(ly, lx, y_name, x_name)
+    except Exception as exc:
+        return {"y": y_name, "x": x_name, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def run_named_pairs(jobs: list[tuple], workers: int | None = None) -> list[dict]:
+    """Fit the listed ``(y_name, x_name, ly, lx)`` jobs. One failure does not stop the rest."""
+    if not jobs:
+        return []
+    if workers is None:
+        workers = min(8, os.cpu_count() or 1)
+    workers = max(1, int(workers))
+    # Spawning a pool costs more than a handful of fits.
+    if workers <= 1 or len(jobs) < 12:
+        print(f"Kalman on {len(jobs)} pairs, single process…", flush=True)
+        rows = []
+        for k, job in enumerate(jobs, 1):
+            rows.append(_run_named_job(job))
+            if k == len(jobs) or k % 20 == 0:
+                print(f"  Kalman {k}/{len(jobs)}", flush=True)
+        return rows
+    print(f"Kalman on {len(jobs)} pairs with {workers} worker(s)…", flush=True)
+    ctx = get_context("spawn")
+    rows = []
+    with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as pool:
+        for k, row in enumerate(pool.map(_run_named_job, jobs, chunksize=2), 1):
+            rows.append(row)
+            if k == len(jobs) or k % 20 == 0:
+                print(f"  Kalman {k}/{len(jobs)}", flush=True)
+    return rows
+
+
 def _init_worker(logp: np.ndarray) -> None:
     global _LOGP
     _LOGP = np.asarray(logp, float)

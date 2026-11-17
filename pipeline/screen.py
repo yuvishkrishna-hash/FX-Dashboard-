@@ -204,3 +204,69 @@ def assert_screen(records: list[dict], screen: dict) -> None:
                 raise SystemExit(f"{row['y']}/{row['x']} {key} is not 250 points.")
         if row["y"] not in known or row["x"] not in known:
             raise SystemExit("A record names a pair outside the 28-pair basket.")
+
+
+def _num(value) -> str:
+    if not _finite(value):
+        return "n/a"
+    return format(float(value), ".3g")
+
+
+def annotate_asset_row(row: dict) -> dict:
+    """Opportunity, watchlist, or the gates a pair fails.
+
+    Thresholds match the FX screen. ``rollingAgrees`` uses ``rollZNow``,
+    which for these rows is the 120-day OLS residual applied at the last close.
+    """
+    out = dict(row)
+    reasons: list[str] = []
+    adf, kpss, hl, z = out.get("adf"), out.get("kpss"), out.get("hl"), out.get("z")
+    if not _finite(adf) or float(adf) >= ADF_MAX:
+        reasons.append("ADF " + _num(adf))
+    if not _finite(kpss) or float(kpss) <= KPSS_MIN:
+        reasons.append("KPSS " + _num(kpss))
+    if not _finite(hl):
+        reasons.append("half-life is not mean-reverting")
+    elif not (HL_MIN <= float(hl) <= HL_MAX):
+        reasons.append("half-life " + _num(hl) + " days is outside 3–30")
+    z_ok = _finite(z) and abs(float(z)) >= Z_OPP
+    z_watch = _finite(z) and Z_WATCH <= abs(float(z)) < Z_OPP
+    if not reasons and z_ok:
+        status, why = "opportunity", "Passes"
+    elif not reasons and z_watch:
+        status, why = "watchlist", "|z| " + _num(abs(float(z))) + " is below 2"
+    else:
+        if not _finite(z):
+            reasons.append("|z| is not available")
+        elif abs(float(z)) < Z_OPP:
+            reasons.append("|z| " + _num(abs(float(z))) + " is below 2")
+        status, why = "fail", " · ".join(reasons)
+    out["status"] = status
+    out["why"] = why
+    out["rollingAgrees"] = rolling_agrees(out)
+    return out
+
+
+def assert_asset_rows(rows: list[dict]) -> None:
+    """Published status, order inputs, and the rolling-agrees flag match the gates."""
+    seen = set()
+    for row in rows:
+        key = (row["y"], row["x"])
+        if key in seen:
+            raise SystemExit(f"Duplicate pair {row['y']}/{row['x']}.")
+        seen.add(key)
+        again = annotate_asset_row(row)
+        if again["status"] != row["status"] or again["why"] != row["why"]:
+            raise SystemExit(f"Status for {row['y']}/{row['x']} does not match the screen gates.")
+        if bool(row["rollingAgrees"]) != rolling_agrees(row):
+            raise SystemExit(f"Rolling-agrees flag is wrong for {row['y']}/{row['x']}.")
+        if row["status"] == "opportunity" and row["why"] != "Passes":
+            raise SystemExit(f"{row['y']}/{row['x']} passes but does not say so.")
+        if row["status"] == "watchlist" and "below 2" not in row["why"]:
+            raise SystemExit(f"{row['y']}/{row['x']} is on the watchlist without a z-score reason.")
+        if len(row.get("zSeries") or []) != 250:
+            raise SystemExit(f"{row['y']}/{row['x']} z-score series is not 250 points.")
+    opps = [r for r in rows if r["status"] == "opportunity"]
+    watch = [r for r in rows if r["status"] == "watchlist"]
+    if {r["status"] for r in opps} & {r["status"] for r in watch}:
+        raise SystemExit("A pair is marked as both an opportunity and a watchlist row.")

@@ -1,13 +1,29 @@
-# FX research dashboard
+# Pair research dashboard
 
-A static research page for 28 major and minor FX pairs. It has two views of the same weekday window:
+A static research page with three asset classes: **FX**, **Commodities**, and **Stocks (S&P 500)**. The same Kalman screen is used throughout. Research only. The page does not place orders, size positions, or recommend trades.
+
+The FX tab is the original 28-pair dashboard. It has two views of the same weekday window:
 
 - **OLS regression matrix** — daily log returns, and log prices (`ln Y = a + b ln X`).
 - **Kalman hedge & spread** — a time-varying hedge ratio, and tests on the tradeable re-hedged spread.
 
-Research only. The page does not place orders, size positions, or recommend trades. There are no exotic pairs.
+There are no exotic pairs.
 
 The generated file is one self-contained `site/index.html` (vanilla JS and SVG, no network once it is open). The same payload is written to `site/data.json`. GitHub Actions rebuilds that site on weekday nights and publishes it with GitHub Pages.
+
+A switcher at the top opens Commodities or Stocks (S&P 500). Those tabs use the same opportunity table, watchlist, Rolling agrees flag, and single Kalman z-score chart. **More** holds the method. **All tested pairs** can be sorted and filtered, and says why each pair fails a gate. The stocks table filters by GICS sector. One failed ticker does not stop the build. If a whole asset class fails, that tab shows the error and the others still publish.
+
+## Commodities
+
+Seven pairs, Y against X: Silver/Gold (`SI=F`/`GC=F`), Brent/WTI (`BZ=F`/`CL=F`), Platinum/Gold (`PL=F`/`GC=F`), Gold miners/Gold (`GDX`/`GC=F`), Copper/Silver (`HG=F`/`SI=F`), AUDUSD/Gold (`AUDUSD=X`/`GC=F`), USDCAD/WTI (`CAD=X`/`CL=F`). Natural gas (`NG=F`) is excluded because contract-roll jumps dominate the spread.
+
+Each pair is aligned on its own common closes. Non-positive prices are dropped, and so is today’s incomplete daily bar (the bar is kept only after 17:15 America/New_York). The last 750 closes are log prices. Kalman variances are estimated on the first 500 and frozen; the tradeable spread and its z-score use the final 250. The rolling z is the log-price residual from an OLS fit on the previous 120 closes, applied to the latest close.
+
+## Stocks (S&P 500)
+
+Constituents and GICS sectors come from the Wikipedia “List of S&P 500 companies” table. If that fetch fails, the build uses the committed `pipeline/data/sp500.csv`. A dot in a listing symbol is a hyphen on Yahoo (`BRK.B` is `BRK-B`). Names with fewer than 750 positive closes are dropped and listed on the tab.
+
+Inside each of the 11 GICS sectors, pairs are ranked by the correlation of daily log returns over the last 504 sessions. The top 20 are tested, about 220 pairs. The tab states how many ADF passes that many tests would produce by chance.
 
 ## Universe
 
@@ -104,7 +120,7 @@ The workflow `.github/workflows/pages.yml`:
 - runs on a manual **workflow_dispatch**,
 - runs on every **push to `main`**.
 
-It installs `requirements.txt`, runs `python -m pipeline.build`, and deploys the `site/` directory with `actions/configure-pages`, `actions/upload-pages-artifact`, and `actions/deploy-pages`.
+It installs `requirements.txt`, runs `python -m pipeline.build` (FX, commodities, and S&P 500), and deploys the `site/` directory with `actions/configure-pages`, `actions/upload-pages-artifact`, and `actions/deploy-pages`.
 
 The committed `site/index.html` is a snapshot, so the page can be opened without waiting for Actions. The scheduled run does not commit a new HTML file back to the repository (that would retrigger the push event). Pages serves the artifact from the latest successful run, which can be newer than the snapshot in git.
 

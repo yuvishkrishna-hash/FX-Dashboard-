@@ -346,6 +346,37 @@ footer { margin-top: 28px; color: var(--faint); font-size: 12.5px; }
 #panel-opp .card, #panel-pair .card { margin-bottom: 0; }
 #panel-opp, #panel-pair { display: grid; gap: 16px; }
 #panel-opp[hidden], #panel-pair[hidden], #panel-full[hidden] { display: none; }
+.asset-nav { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }
+.asset-nav a {
+  text-decoration: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 14px;
+  color: var(--muted);
+}
+.asset-nav a[aria-current="page"] {
+  color: var(--gold);
+  border-color: rgba(224, 177, 94, 0.5);
+  background: var(--gold-dim);
+}
+#asset-root[hidden] { display: none; }
+#panel-asset, #panel-asset-pair, #panel-asset-more { display: grid; gap: 16px; margin-top: 18px; }
+#panel-asset[hidden], #panel-asset-pair[hidden], #panel-asset-more[hidden] { display: none; }
+.callout {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(224, 177, 94, 0.45);
+  background: var(--gold-dim);
+  color: var(--text);
+}
+.callout[hidden] { display: none; }
+.subname { display: block; color: var(--faint); font-family: var(--sans); font-size: 11px; font-weight: 450; white-space: normal; }
+td.wrap { white-space: normal; text-align: left; max-width: 280px; }
+table.data.static tbody tr { cursor: default; }
+table.data.static tbody tr:hover { background: transparent; }
+#asset-lead { margin-top: 12px; }
+#asset-sector-field[hidden] { display: none; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 @media (max-width: 1180px) {
   .split, .cards { grid-template-columns: 1fr 1fr; }
@@ -357,4 +388,5 @@ footer { margin-top: 28px; color: var(--faint); font-size: 12.5px; }
   .wrap { padding: 18px 12px 48px; }
   table.data { font-size: 12px; }
   .tabs button { padding: 10px 12px; }
+  .asset-nav a { padding: 6px 12px; }
 }
